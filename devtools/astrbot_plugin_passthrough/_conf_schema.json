@@ -1,0 +1,47 @@
+{
+  "backend_url": {
+    "description": "后端地址（POST，JSON）",
+    "type": "text",
+    "default": "http://127.0.0.1:8787/chat",
+    "hint": "收到消息后转发到该地址；请求 {\"session_id\",\"user_id\",\"text\"}，响应 {\"reply\"} 或 {\"text\"} 或纯文本。"
+  },
+  "api_token": {
+    "description": "后端鉴权 Token（可空）",
+    "type": "text",
+    "default": "",
+    "hint": "非空时以 Authorization: Bearer <token> 发送。"
+  },
+  "session_whitelist": {
+    "description": "会话白名单",
+    "hint": "留空表示所有会话都转发。群聊填写群号，私聊填写用户 ID。",
+    "type": "list",
+    "items": {
+      "type": "string"
+    },
+    "default": []
+  },
+  "ack_text": {
+    "description": "回执文案（空=不发）",
+    "type": "text",
+    "default": "收到，处理中…",
+    "hint": "长任务先回一条，避免以为没反应；白名单群全量转发时建议留空。"
+  },
+  "timeout_seconds": {
+    "description": "后端超时（秒）",
+    "type": "int",
+    "default": 180,
+    "hint": "超过该时间未返回则回复超时提示。"
+  },
+  "push_enabled": {
+    "description": "启用主动推送",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后每 5 秒扫 data/plugin_data/astrbot_plugin_passthrough/push_spool/ 下的 *.json 并发到 push_target。"
+  },
+  "push_target": {
+    "description": "主动推送目标（unified_msg_origin）",
+    "type": "text",
+    "default": "",
+    "hint": "如 default:FriendMessage:2185281742（私聊）或 default:GroupMessage:455737212（群聊）。"
+  }
+}

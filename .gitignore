@@ -1,0 +1,15 @@
+# 嵌套的独立仓库（cpi 自己有 git）
+cpi/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 备份文件
+*.bak
+
+# 密钥/凭据（防误提交）
+.secrets/
+*.key
+*.pem
+.env

@@ -1,0 +1,10 @@
+name: astrbot_plugin_passthrough
+display_name: 透穿桥
+desc: "把消息转发给外部后端，并把后端回复发回聊天；AstrBot 仅作传输层，不走自带 LLM。按会话白名单触发，群聊无需 @。"
+version: v0.5.0
+author: moyamryia
+repo: https://github.com/moyamryia/astrbot_plugin_passthrough
+keywords:
+  - passthrough
+  - bridge
+  - backend

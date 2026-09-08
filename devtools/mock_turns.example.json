@@ -1,0 +1,7 @@
+{
+  "turns": [
+    {"tool_calls": [{"name": "find_tools", "arguments": {"query": ["图书馆", "查书"]}}]},
+    {"tool_calls": [{"name": "bash", "arguments": {"cmd": "~/agent-tools/tools/nju/lib_search.py 数学 --rows 2"}}]},
+    {"reasoning": "工具结果够回答了。", "content": "图书馆检索完成（mock 剧本终答）。"}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "skip_from": [
+    "noreply", "no-reply", "donotreply", "do-not-reply",
+    "notifications?@", "newsletter", "marketing", "mailer-daemon",
+    "github\\.com", "bilibili", "zhihu", "twitter", "facebook",
+    "alipay", "taobao", "jd\\.com", "amazon"
+  ],
+  "skip_subject": [
+    "^\\[GitHub\\]",
+    "验证码", "verification code", "one-?time",
+    "unsubscribe", "退订",
+    "newsletter", "每日", "周报", "日报", "促销", "优惠"
+  ],
+  "keep_from": [
+    "nju\\.edu\\.cn",
+    "smail\\.nju\\.edu\\.cn"
+  ],
+  "keep_subject": [
+    "组会", "答辩", "成绩", "选课", "补考", "缴费",
+    "面试", "录用", "紧急", "urgent", "重要"
+  ]
+}
