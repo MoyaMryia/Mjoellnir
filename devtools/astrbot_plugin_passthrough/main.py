@@ -27,7 +27,7 @@ DATA_DIR = Path("data/plugin_data") / PLUGIN_NAME
 
 @register(PLUGIN_NAME, "moyamryia",
           "透穿：把消息转发给外部后端并把回复发回聊天（不走自带 LLM，按会话白名单触发）",
-          "0.5.0")
+          "0.5.1")
 class PassthroughPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -94,7 +94,7 @@ class PassthroughPlugin(Star):
                             f.unlink(missing_ok=True)
             except Exception as e:
                 logger.warning("[passthrough] 推送循环异常: %s", e)
-            await asyncio.sleep(5)
+            await asyncio.sleep(2)
 
     # ---------- 会话映射 ----------
 
@@ -163,13 +163,15 @@ class PassthroughPlugin(Star):
                 await event.send_typing()
             except Exception:
                 pass
-            reply = await self._call_backend(sid, sender, text)
+            reply = await self._call_backend(sid, sender, text,
+                                             event.unified_msg_origin)
             if reply:
                 await event.send(event.plain_result(reply))
 
     # ---------- 后端调用 ----------
 
-    async def _call_backend(self, sid: str, user_id: str, text: str) -> str:
+    async def _call_backend(self, sid: str, user_id: str, text: str,
+                            umo: str = "") -> str:
         url = str(self.config.get("backend_url", "") or "").strip()
         if not url:
             return "后端未配置（backend_url 为空）。"
@@ -178,7 +180,8 @@ class PassthroughPlugin(Star):
         token = str(self.config.get("api_token", "") or "").strip()
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        payload = {"session_id": sid, "user_id": user_id, "text": text}
+        payload = {"session_id": sid, "user_id": user_id, "text": text,
+                   "umo": umo}
         try:
             timeout_cfg = aiohttp.ClientTimeout(total=timeout)
             async with aiohttp.ClientSession(timeout=timeout_cfg) as sess:

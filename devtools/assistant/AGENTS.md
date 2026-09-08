@@ -23,6 +23,14 @@
   并且只有我批准后才会真正执行。
 - 想把你的工具"转正"（收进 agent-tools / 获得特权）：把脚本放 `/srv/agent-staging/` 给我看，由我决定。
 
+## 找工具
+- 工具清单别背，查注册表：
+  `sudo -n -u moyamryia /usr/local/sbin/agent-tools-privileged tools/find_tools.py <关键词>`
+  （返回名称、用法、参数、描述）
+- 调用统一走：
+  `sudo -n -u moyamryia /usr/local/sbin/agent-tools-privileged tools/<脚本> ...`
+- 原则：**能用工具查到的先去查，查不到再问我**，别一上来就反问。
+
 ## 个人资料库
 - 回答关于我的事实性问题前，先查资料库：
   `sudo -n -u moyamryia /usr/local/sbin/agent-tools-privileged tools/kb_search.py <关键词>`。

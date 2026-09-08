@@ -34,6 +34,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 import sqlite3
@@ -82,6 +83,58 @@ APPROVALS_DB = "/home/moyamryia/agent-tools/state/approvals.db"
 APPROVE_CLI = "/home/moyamryia/agent-tools/tools/approve.py"
 APPROVE_EXEC = "/home/moyamryia/agent-tools/tools/approve_exec.py"
 APPROVAL_RE = re.compile(r'\{\s*"status"\s*:\s*"approval_required".*?\}', re.S)
+PUSH_SPOOL = ("/home/moyamryia/astrbot/data/plugin_data/"
+              "astrbot_plugin_passthrough/push_spool")
+TOOL_LABELS = {
+    "nju/mail.py": "处理邮件",
+    "nju/kb_query.py": "查课表",
+    "nju/lib_search.py": "查图书馆",
+    "nju/repair.py": "处理报修",
+    "kb_search.py": "查资料库",
+    "kb_write.py": "写资料库",
+    "find_tools.py": "找工具",
+}
+
+
+def progress_info(cmd: str):
+    """认出 agent-tools 特权调用，返回 (人读标签, 脚本路径)；非特权返回 (None, None)。"""
+    m = re.search(r"agent-tools-privileged\s+tools/(\S+?)(?:\s|$)", cmd or "")
+    if not m:
+        return None, None
+    script = m.group(1)
+    return TOOL_LABELS.get(script, "执行工具"), f"tools/{script}"
+
+
+def tool_args_summary(tool, args):
+    if not isinstance(args, dict):
+        return str(args)[:200]
+    if tool == "bash":
+        return re.sub(r"\s+", " ", str(args.get("command") or ""))[:200]
+    for k in ("path", "file_path", "filePath", "pattern", "query", "url"):
+        if args.get(k):
+            return str(args[k])[:200]
+    return json.dumps(args, ensure_ascii=False)[:200]
+
+
+def tool_result_summary(result):
+    text = ""
+    try:
+        content = (result or {}).get("content") or []
+        parts = [c.get("text", "") for c in content
+                 if isinstance(c, dict) and c.get("type") == "text"]
+        text = "\n".join(parts).strip()
+    except Exception:
+        text = str(result)
+    return re.sub(r"\s+", " ", text)[:300]
+
+
+def push_spool(text: str, umo: str) -> None:
+    os.makedirs(PUSH_SPOOL, exist_ok=True)
+    name = f"gw-{int(time.time())}-{secrets.token_hex(3)}.json"
+    tmp = os.path.join(PUSH_SPOOL, name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"text": text, "umo": umo}, f, ensure_ascii=False)
+    os.replace(tmp, os.path.join(PUSH_SPOOL, name))
 APPROVE_RE = re.compile(r"^(y|yes|ok|批准|同意|好|是|确认|approve)(?:\s+(.*))?$", re.I)
 DENY_RE = re.compile(r"^(n|no|拒绝|取消|不行|不要|否|deny|reject)(?:\s+(.*))?$", re.I)
 
@@ -250,7 +303,7 @@ class PiRpc:
             self.last_used = time.time()
             return self.responses.pop(rid)
 
-    def prompt(self, text, timeout):
+    def prompt(self, text, timeout, progress=None):
         with self.event_cv:
             self.events = []
             self.settled = False
@@ -259,6 +312,30 @@ class PiRpc:
             return "（pi 拒绝了请求）" + str(ack.get("error") or ""), None
         deadline = time.time() + timeout
         timed_out = False
+        seen = 0
+        labels = {}
+
+        def emit(ev):
+            t = ev.get("type")
+            tid = ev.get("toolCallId") or ""
+            tool = ev.get("toolName") or "?"
+            if t == "tool_execution_start":
+                if tool == "bash":
+                    cmd = str((ev.get("args") or {}).get("command") or "")
+                    label, script = progress_info(cmd)
+                    if label:
+                        labels[tid] = label
+                        progress(f"🔧 {label}（{script}）")
+                    else:
+                        flat = re.sub(r"\s+", " ", cmd)[:200]
+                        progress(f"🔧 bash: {flat}")
+                else:
+                    progress(f"🔧 {tool}: {tool_args_summary(tool, ev.get('args'))}")
+            else:
+                name = labels.get(tid) or tool
+                tag = "❌" if ev.get("isError") else "↩️"
+                progress(f"{tag} {name} 返回: {tool_result_summary(ev.get('result'))}")
+
         with self.event_cv:
             while not self.settled:
                 if not self.alive():
@@ -267,6 +344,12 @@ class PiRpc:
                 if remain <= 0:
                     timed_out = True
                     break
+                if progress and len(self.events) > seen:
+                    for ev in self.events[seen:]:
+                        if ev.get("type") in ("tool_execution_start",
+                                              "tool_execution_end"):
+                            emit(ev)
+                    seen = len(self.events)
                 self.event_cv.wait(min(remain, 0.5))
             events = list(self.events)
         self.last_used = time.time()
@@ -317,6 +400,9 @@ class Session:
         self.last_pi_sid = None
         self.pending_reload = 0.0
         self.pending_approval = None
+        self.umo = ""
+        self.last_progress = 0.0
+        self.last_label = ""
 
     def _do_reload(self):
         if self.rpc:
@@ -368,8 +454,18 @@ class Session:
             rest = parts[1].strip() if len(parts) > 1 else ""
         return rest
 
+    def _notify_progress(self, msg):
+        if not self.umo or not self.gw.progress:
+            return
+        log(f"progress -> {msg[:120]}")
+        try:
+            push_spool(msg, self.umo)
+        except Exception as e:
+            log(f"进度推送失败: {e}")
+
     def _run_prompt(self, rpc, text):
-        reply, aid = rpc.prompt(text, self.gw.timeout)
+        reply, aid = rpc.prompt(text, self.gw.timeout,
+                                progress=self._notify_progress)
         if aid:
             rec = lookup_pending(aid)
             if rec:
@@ -381,8 +477,10 @@ class Session:
                     f"回复「批准」执行，或「拒绝 <理由>」取消。")
         return reply
 
-    def handle(self, text):
+    def handle(self, text, umo=""):
         with self.lock:
+            if umo:
+                self.umo = umo
             t = text.strip()
             if self.pending_reload:
                 if time.time() > self.pending_reload:
@@ -442,7 +540,7 @@ class Session:
 
 class Gateway:
     def __init__(self, cwd, model, timeout, token, pi, idle, builtin_tools,
-                 pi_user=None):
+                 pi_user=None, progress=True):
         self.cwd = cwd
         self.model_str = model
         self.timeout = timeout
@@ -451,6 +549,7 @@ class Gateway:
         self.pi_user = pi_user
         self.idle = idle
         self.builtin_tools = builtin_tools
+        self.progress = progress
         self.provider, self.model_id = split_model(model)
         self.sessions = {}
         self.sessions_lock = threading.Lock()
@@ -482,8 +581,8 @@ class Gateway:
                 self.sessions[sid] = s
             return s
 
-    def handle(self, sid, text):
-        return self.session(sid).handle(text)
+    def handle(self, sid, text, umo=""):
+        return self.session(sid).handle(text, umo)
 
     def handle_command(self, sess, text):
         head, _, arg = text.partition(" ")
@@ -656,11 +755,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         sid = str(req.get("session_id") or "default").strip() or "default"
         text = str(req.get("text") or "").strip()
+        umo = str(req.get("umo") or "").strip()
         if not text:
             self._json(400, {"error": {"message": "empty text"}})
             return
         started = time.time()
-        reply = self.gw.handle(sid, text)
+        reply = self.gw.handle(sid, text, umo)
         log(f"sid={sid} {time.time() - started:.1f}s cmd={text[:24]!r} "
             f"reply={len(reply)}B")
         self._json(200, {"reply": reply})
@@ -680,13 +780,16 @@ def main():
                     help="禁用 pi 内置工具（默认启用；内置工具以 piagent 身份运行，无特权）")
     ap.add_argument("--pi-user", default="",
                     help="以该低权限账户运行 pi（如 piagent；经 sudo -n -H -u）")
+    ap.add_argument("--no-progress", action="store_true",
+                    help="关闭工具执行进度推送（默认开启，只推 agent-tools 特权调用）")
     args = ap.parse_args()
     if not os.path.exists(args.pi):
         print(f"error: 找不到 pi: {args.pi}", file=sys.stderr)
         sys.exit(2)
     os.makedirs(args.cwd, exist_ok=True)
     gw = Gateway(args.cwd, args.model, args.timeout, args.token, args.pi,
-                 args.idle, not args.no_builtin_tools, args.pi_user or None)
+                 args.idle, not args.no_builtin_tools, args.pi_user or None,
+                 not args.no_progress)
     Handler.gw = gw
 
     def _stop(signum, frame):
