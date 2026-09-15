@@ -27,7 +27,7 @@ DATA_DIR = Path("data/plugin_data") / PLUGIN_NAME
 
 @register(PLUGIN_NAME, "moyamryia",
           "透穿：把消息转发给外部后端并把回复发回聊天（不走自带 LLM，按会话白名单触发）",
-          "0.5.1")
+          "0.6.0")
 class PassthroughPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -64,6 +64,8 @@ class PassthroughPlugin(Star):
     async def _push_loop(self) -> None:
         spool = DATA_DIR / "push_spool"
         spool.mkdir(parents=True, exist_ok=True)
+        fails: dict[str, int] = {}
+        max_fails = 45
         while True:
             try:
                 for f in sorted(spool.glob("*.json")):
@@ -74,24 +76,38 @@ class PassthroughPlugin(Star):
                         logger.warning("[passthrough] 推送文件损坏 %s: %s", f.name, e)
                     target = str(item.get("umo") or self.push_target or "").strip()
                     text = str(item.get("text") or "")
-                    if not (target and text):
+                    image = str(item.get("image") or "")
+                    if not (target and (text or image)):
                         logger.warning("[passthrough] 推送目标为空，丢弃 %s", f.name)
                         f.unlink(missing_ok=True)
                         continue
                     try:
-                        found = await self.context.send_message(
-                            target, MessageChain().message(text))
+                        chain = MessageChain()
+                        if text:
+                            chain.message(text)
+                        if image:
+                            chain.file_image(image)
+                        found = await self.context.send_message(target, chain)
                     except Exception as e:
                         found = False
                         logger.warning("[passthrough] 推送异常 %s: %s", target, e)
                     if found:
                         f.unlink(missing_ok=True)
+                        fails.pop(f.name, None)
                     else:
-                        logger.warning("[passthrough] 推送失败(未找到平台?) %s", target)
-                        try:
-                            f.rename(f.with_suffix(".err"))
-                        except OSError:
-                            f.unlink(missing_ok=True)
+                        n = fails.get(f.name, 0) + 1
+                        fails[f.name] = n
+                        if n >= max_fails:
+                            logger.warning("[passthrough] 推送失败 %d 次，放弃 %s",
+                                           n, f.name)
+                            try:
+                                f.rename(f.with_suffix(".err"))
+                            except OSError:
+                                f.unlink(missing_ok=True)
+                            fails.pop(f.name, None)
+                        else:
+                            logger.warning("[passthrough] 推送失败(第 %d 次)，"
+                                           "稍后重试 %s", n, f.name)
             except Exception as e:
                 logger.warning("[passthrough] 推送循环异常: %s", e)
             await asyncio.sleep(2)

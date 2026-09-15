@@ -12,7 +12,7 @@
 
 QQ 里可用的命令（网关翻译成 RPC 命令）:
   /new                    新会话
-  /model [provider/model] 查看/切换模型
+/model [provider/model] 查看/切换模型（切换后记住）
   /status                 会话状态
   /compact [说明]         压缩上下文
   /abort                  中断当前任务
@@ -58,8 +58,14 @@ HELP_TEXT = """命令：
 /compact [说明] 压缩上下文
 /abort 中断当前任务
 /name <名字> 命名会话
+/browser grants 查看浏览器交互授权
+/browser revoke <域名> 撤销某域名授权
+/browser watch on|off 网址变动自动截图推送
 /help 本帮助
 其它 /xxx 为 pi 自定义命令（若有）"""
+
+BROWSER_PY = "/home/moyamryia/agent-tools/tools/browser.py"
+VENV_PY = "/home/moyamryia/agent-tools/venv/bin/python"
 
 
 def log(*parts):
@@ -85,6 +91,7 @@ APPROVE_EXEC = "/home/moyamryia/agent-tools/tools/approve_exec.py"
 APPROVAL_RE = re.compile(r'\{\s*"status"\s*:\s*"approval_required".*?\}', re.S)
 PUSH_SPOOL = ("/home/moyamryia/astrbot/data/plugin_data/"
               "astrbot_plugin_passthrough/push_spool")
+MODEL_CONF = "/home/moyamryia/assistant/model.conf"
 TOOL_LABELS = {
     "nju/mail.py": "处理邮件",
     "nju/kb_query.py": "查课表",
@@ -418,7 +425,7 @@ class Session:
             pi_sid = self.last_pi_sid or self.gw.safe_pi_sid(self.sid)
             argv = self.gw.pi_argv(pi_sid)
             log(f"启动 pi RPC: session={self.sid} pi-sid={pi_sid}")
-            self.rpc = PiRpc(self.sid, argv, self.gw.cwd)
+            self.rpc = PiRpc(pi_sid, argv, self.gw.cwd)
         return self.rpc
 
     def _exec_approval(self, aid):
@@ -551,6 +558,16 @@ class Gateway:
         self.builtin_tools = builtin_tools
         self.progress = progress
         self.provider, self.model_id = split_model(model)
+        try:
+            with open(MODEL_CONF, encoding="utf-8") as f:
+                saved = f.read().strip()
+            if saved:
+                self.provider, self.model_id = split_model(saved)
+                model = saved
+                log(f"模型配置来自 {MODEL_CONF}: {saved}")
+        except OSError:
+            pass
+        self.model_str = model
         self.sessions = {}
         self.sessions_lock = threading.Lock()
         self.stopping = False
@@ -558,6 +575,16 @@ class Gateway:
 
     def safe_pi_sid(self, sid):
         return safe_sid(sid)
+
+    def persist_model(self, provider, model_id):
+        self.provider, self.model_id = provider, model_id
+        self.model_str = f"{provider}/{model_id}" if provider else model_id
+        try:
+            with open(MODEL_CONF, "w", encoding="utf-8") as f:
+                f.write(self.model_str + "\n")
+            log(f"模型已持久化: {self.model_str}")
+        except OSError as e:
+            log(f"写 {MODEL_CONF} 失败: {e}")
 
     def pi_argv(self, pi_sid):
         argv = [self.pi, "--mode", "rpc", "--session-id", pi_sid]
@@ -644,7 +671,10 @@ class Gateway:
                              "modelId": model_id}, 30)
             if r.get("success"):
                 m = r.get("data") or {}
-                return f"已切换: {m.get('provider')}/{m.get('id')}"
+                pid_, mid = m.get("provider"), m.get("id")
+                if pid_ and mid:
+                    self.persist_model(pid_, mid)
+                return f"已切换并记住: {pid_}/{mid}（新会话/重启后仍生效）"
             return "切换失败: " + str(r.get("error") or r)
 
         if cmd == "/status":
@@ -675,6 +705,53 @@ class Gateway:
                 return "用法: /name <名字>"
             err = simple({"type": "set_session_name", "name": arg}, 15)
             return "已命名。" if not err else "命名失败: " + err
+
+        if cmd == "/browser":
+            args = arg.split()
+            sub = args[0].lower() if args else "grants"
+            if sub in ("watch", "监测"):
+                flag = "/home/moyamryia/.browser/watch_enabled"
+                what = args[1].lower() if len(args) > 1 else ""
+                if what in ("on", "开", "1"):
+                    open(flag, "w").close()
+                    return "网址监测已开启：Firefox 每次跳转都会截图推给你。"
+                if what in ("off", "关", "0"):
+                    try:
+                        os.remove(flag)
+                    except OSError:
+                        pass
+                    return "网址监测已关闭。"
+                return ("网址监测：" + ("开启" if os.path.exists(flag) else "关闭")
+                        + "。用法: /browser watch on|off")
+            if sub in ("grants", "list", ""):
+                cli = [VENV_PY, BROWSER_PY, "grants"]
+            elif sub in ("revoke", "撤"):
+                if len(args) < 2:
+                    return "用法: /browser revoke <域名>"
+                cli = [VENV_PY, BROWSER_PY, "grants", "--revoke", args[1]]
+            else:
+                return "用法: /browser grants | /browser revoke <域名>"
+            try:
+                p = subprocess.run(cli, capture_output=True, text=True,
+                                   timeout=30)
+            except Exception as e:
+                return f"浏览器授权查询失败: {e}"
+            if p.returncode != 0:
+                return "浏览器授权查询失败: " + (p.stderr or "").strip()[:200]
+            try:
+                data = json.loads(p.stdout or "{}")
+            except ValueError:
+                return p.stdout.strip()[:300]
+            if sub in ("revoke", "撤"):
+                return (f"已撤销 {args[1]} 的浏览器交互授权。"
+                        if data.get("ok") else f"没有 {args[1]} 的有效授权。")
+            grants = data.get("grants") or []
+            if not grants:
+                return "当前没有浏览器交互授权。"
+            lines = [f"浏览器交互授权（{len(grants)} 条）："]
+            for g in grants:
+                lines.append(f"· {g['subject']}（剩余 {g['left_hours']}h）")
+            return "\n".join(lines)
 
         name = cmd.lstrip("/")
         try:
