@@ -61,10 +61,14 @@ HELP_TEXT = """命令：
 /browser grants 查看浏览器交互授权
 /browser revoke <域名> 撤销某域名授权
 /browser watch on|off 网址变动自动截图推送
+/remind 查看待触发提醒（/remind list）
+/remind add <HH:MM|时长|完整时间> <内容>  加提醒
+/remind del <id前缀> 取消提醒
 /help 本帮助
 其它 /xxx 为 pi 自定义命令（若有）"""
 
 BROWSER_PY = "/home/moyamryia/agent-tools/tools/browser.py"
+REMIND_PY = "/home/moyamryia/assistant/reminder.py"
 VENV_PY = "/home/moyamryia/agent-tools/venv/bin/python"
 
 
@@ -752,6 +756,40 @@ class Gateway:
             for g in grants:
                 lines.append(f"· {g['subject']}（剩余 {g['left_hours']}h）")
             return "\n".join(lines)
+
+        if cmd == "/remind":
+            parts = arg.split()
+            sub = parts[0].lower() if parts else "list"
+            if sub in ("list", "查"):
+                argv = ["list"]
+            elif sub in ("del", "cancel", "删"):
+                if len(parts) < 2:
+                    return "用法: /remind del <id前缀>"
+                argv = ["cancel", parts[1]]
+            elif sub == "show":
+                if len(parts) < 2:
+                    return "用法: /remind show <id前缀>"
+                argv = ["show", parts[1]]
+            elif sub in ("add", "加"):
+                if len(parts) < 3:
+                    return ("用法: /remind add <HH:MM|时长|完整时间> <内容>\n"
+                            "例: /remind add 18:30 取快递 / "
+                            "/remind add 45m 站起来走走")
+                t, text = parts[1], " ".join(parts[2:])
+                argv = ["add", "--at" if ":" in t else "--in", t,
+                        "--text", text]
+            else:
+                return ("用法: /remind [list] | add <时间> <内容> | "
+                        "del <id前缀> | show <id前缀>")
+            try:
+                p = subprocess.run([sys.executable, REMIND_PY, *argv],
+                                   capture_output=True, text=True, timeout=20)
+            except Exception as e:
+                return f"提醒工具执行失败: {e}"
+            if p.returncode != 0:
+                return ("提醒命令失败: "
+                        + ((p.stderr or "").strip() or p.stdout.strip())[:300])
+            return (p.stdout or "").strip()[:1500] or "(无输出)"
 
         name = cmd.lstrip("/")
         try:

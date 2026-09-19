@@ -42,6 +42,8 @@ NapCat（QQ 协议端） ──反向 WS──▶ AstrBot
 │   ├── mock_turns.example.json             # 假后端的脚本化回复样例
 │   ├── assistant/
 │   │   ├── AGENTS.md                       # 助手的行为约定（说话风格 / 硬规矩 / 工具发现）
+│   │   ├── reminder.py                     # 提醒 daemon：到点推送 + 定时 Agent 任务 + 课程提醒物化
+│   │   ├── remind_client.py                # Agent 免审客户端（部署为 reminders/bin/remind）
 │   │   ├── mail_poll.py                    # 邮箱轮询：拉新邮件 → 过滤 → 推送
 │   │   ├── mail_filter.json                # 邮件过滤规则（keep/skip 白黑名单）
 │   │   ├── kb_maintenance.py               # 每日维护：过一遍资料库与近期邮件，写增量笔记
@@ -73,6 +75,7 @@ AstrBot 插件与 pi 之间的中间层，HTTP JSON。
   - `/name` 命名会话、`/help` 帮助 + pi 自定义命令清单
   - `/reload` 重启 pi 进程（加载新写的扩展，二次确认）
   - `/browser grants|revoke|watch` 查看/撤销浏览器交互授权、开关网址监测
+  - `/remind [list] | add <时间> <内容> | del <id前缀> | show <id前缀>` 直达提醒工具
 - **审批回环**：工具被闸门拦下时输出 `approval_required`，网关识别后追加提示；你在 QQ 回「批准」即调用 `approve_exec` 原样重放被拦的动作，回「拒绝」则把理由转达给 pi
 - **进度推送**：把工具调用/返回（以及特权脚本名）写进推送队列，由插件发到 QQ
 - 需要 `Authorization: Bearer <token>`（防止 Agent 伪造确认）
@@ -86,6 +89,8 @@ AstrBot 插件与 pi 之间的中间层，HTTP JSON。
 ### `devtools/assistant/` — 常驻脚本与约定
 
 - **AGENTS.md**：助手的人设与硬规矩（产出物中性专业、工具用 `find_tools` 发现、资料库读写规则等）
+- **reminder.py**：提醒 daemon（systemd `reminderd` 常驻）。两类条目：`notify` 到点把文本推 QQ；`agent` 到点把指示经网关 `/chat` 交给 pi 自主干活、结果推回 QQ。支持重复（daily/weekly/every:Nu）；机器不在线导致的迟到在补推时限内补推并标注，超过则推"错过"汇总——不静默丢弃。每天 04:05 从课表物化未来 7 天的上课提醒（稳定 id、接口失败用快照兜底）。所有者 CLI：`add/list/show/cancel/snooze/sync-class`；QQ 侧走网关 `/remind`
+- **remind_client.py**：Agent 免审客户端（部署为 `/srv/agent-staging/reminders/bin/remind`）。以 piagent 身份运行，不经 sudo、不进审批闸门：校验后把请求 JSON 原子写入 `requests/` 队列，daemon 消费；非法请求挪 `rejected/` 附原因；`list` 读只读投影 `upcoming.json`
 - **mail_poll.py**：定时拉新邮件，按 `mail_filter.json` 过滤后推送（不重复处理）
 - **kb_maintenance.py**：每日过一遍资料库与近期邮件，写带出处的增量笔记
 - **browser_watch.py**：轮询当前网页 URL，跳转即截图推 QQ（浏览器被占用时自动跳过）
@@ -102,9 +107,10 @@ AstrBot 插件与 pi 之间的中间层，HTTP JSON。
 在助手主机上：
 
 1. 部署 `pi_gateway.py`，用 systemd 常驻，token 放在仅所有者可读的环境文件里
-2. AstrBot 装入透穿插件并配置后端地址/token/白名单/推送目标
-3. 定时任务用于邮箱轮询、资料库每日维护等
-4. 浏览器栈（Xvfb / 窗口管理器 / Firefox / VNC / noVNC）各自以 systemd 常驻
+2. 部署 `assistant/reminder.py` 为 systemd 服务（`reminderd`），并把 `remind_client.py` 放进 Agent 可写的暂存目录（`bin/remind`）；课程提醒时段表放 `class_periods.json`
+3. AstrBot 装入透传插件并配置后端地址/token/白名单/推送目标
+4. 定时任务用于邮箱轮询、资料库每日维护等
+5. 浏览器栈（Xvfb / 窗口管理器 / Firefox / VNC / noVNC）各自以 systemd 常驻
 
 具体路径与账户名因机器而异，此处用占位说明。
 
