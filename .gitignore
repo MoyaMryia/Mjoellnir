@@ -13,3 +13,6 @@ __pycache__/
 *.key
 *.pem
 .env
+
+# /goal 运行时状态
+.pi/goals/
