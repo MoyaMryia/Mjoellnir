@@ -18,12 +18,34 @@ function budgetLines(goal: Goal): string {
   ].join("\n");
 }
 
+/** 计划段落：assessor 事前拟定的 direct/tree 策略。 */
+function planLines(goal: Goal): string {
+  const p = goal.plan;
+  if (!p) return "";
+  if (p.mode === "direct") {
+    return `计划（独立评估）：直接求解。${p.rationale ? `理由：${p.rationale}` : ""}`;
+  }
+  const angles = p.angles.length
+    ? p.angles.map((a, i) => `  ${i + 1}. ${a}`).join("\n")
+    : "  （未给出角度，自行提出多个不同方向）";
+  return [
+    `计划（独立评估）：开放/多方向任务，做广度优先 —— ${p.branches} 个方向 × 最多 ${p.depth} 轮；评估方式 = ${p.evaluator.kind === "checks" ? "可执行 checks" : "rubric 评审"}。`,
+    p.rationale ? `理由：${p.rationale}` : "",
+    "先不要直奔第一条路。对下面每个方向给出初步结论/要点，比较后选最优深入：",
+    angles,
+    "把未选的方向简短保留在回答里（便于回退），不要假装它们不存在。",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 /** 目标感知：只在非续跑轮注入，让模型知道"有个 active goal"。 */
 export function awareness(goal: Goal): string {
   return [
     `<goal_status id="${goal.id}">`,
     `objective: ${escapeXml(goal.objective)}`,
     goal.constraints.length ? `constraints: ${goal.constraints.map(escapeXml).join(" | ")}` : "",
+    goal.plan ? `plan: ${goal.plan.mode}（branches ${goal.plan.branches}, depth ${goal.plan.depth}）` : "",
     `status: active`,
     budgetLines(goal),
     "</goal_status>",
@@ -51,6 +73,7 @@ export function continuation(goal: Goal): string {
     goal.constraints.length
       ? `\n约束（必须同时满足）：\n${goal.constraints.map((c) => `- ${escapeXml(c)}`).join("\n")}`
       : "",
+    planLines(goal),
     "",
     "续跑行为：",
     "- 目标跨轮持续。本轮的结束不等于要把目标缩成「现在做得完的部分」。",

@@ -14,9 +14,11 @@ import { Type } from "typebox";
 import { awareness, budgetLimit, continuation } from "./prompts.ts";
 import { formatChecks, runChecks } from "./oracle.ts";
 import { runAudit } from "./auditor.ts";
+import { runAssess } from "./assessor.ts";
 import {
   activeGoalForSession,
   budgetExhausted,
+  clampPlan,
   type Check,
   type Goal,
   type GoalStatus,
@@ -79,6 +81,10 @@ function describe(goal: Goal): string {
   ];
   if (goal.constraints.length) lines.push(`constraints: ${goal.constraints.join(" | ")}`);
   if (goal.checks.length) lines.push(`checks: ${goal.checks.map((c) => c.name).join(", ")}`);
+  if (goal.plan)
+    lines.push(
+      `plan: ${goal.plan.mode}（branches ${goal.plan.branches}, depth ${goal.plan.depth}）${goal.plan.rationale ? ` — ${goal.plan.rationale}` : ""}`,
+    );
   lines.push(`budget: turns ${goal.spent.turns}/${goal.budget.turns}（剩 ${turnsRemaining(goal)}）`);
   if (goal.audit) lines.push(`audit: ${goal.audit.done ? "done" : "not done"}`);
   return lines.join("\n");
@@ -109,7 +115,18 @@ function boundaryEntry(customType: string, content: string) {
   return { type: "custom_message" as const, customType, content, display: false };
 }
 
-const SUBCOMMANDS = new Set(["show", "pause", "resume", "clear", "checks", "budget"]);
+/** 事前独立评估：填 goal.plan。失败不阻断建目标，退化为 direct。 */
+async function assessGoal(ctx: ExtensionContext, goal: Goal): Promise<void> {
+  report(ctx, "正在独立评估任务、拟定计划（新上下文，约 5–15s）…");
+  try {
+    goal.plan = await runAssess({ cwd: ctx.cwd, goal });
+  } catch {
+    goal.plan = clampPlan({ mode: "direct" }, { hasChecks: goal.checks.length > 0 });
+  }
+  saveGoal(ctx.cwd, goal);
+}
+
+const SUBCOMMANDS = new Set(["show", "pause", "resume", "clear", "checks", "budget", "plan"]);
 
 export default function (pi: ExtensionAPI) {
   let currentGoalId: string | undefined;
@@ -255,6 +272,10 @@ export default function (pi: ExtensionAPI) {
           report(ctx, g.checks.length ? g.checks.map((c) => `· ${c.name}: ${c.cmd}`).join("\n") : "该 goal 没有 checks。");
           return;
         }
+        if (first === "plan") {
+          report(ctx, g.plan ? JSON.stringify(g.plan, null, 2) : "该 goal 还没有 plan。");
+          return;
+        }
         if (first === "budget") {
           const n = Number.parseInt(rest, 10);
           if (!Number.isFinite(n) || n <= 0) {
@@ -291,7 +312,9 @@ export default function (pi: ExtensionAPI) {
       const g = newGoal({ sessionId: sid, objective, checks: chks });
       saveGoal(ctx.cwd, g);
       currentGoalId = g.id;
-      report(ctx, `已创建 goal ${g.id}（${g.budget.turns} 轮预算，${chks.length} 条 checks）。\n${describe(g)}`);
+      report(ctx, `已创建 goal ${g.id}（${g.budget.turns} 轮预算，${chks.length} 条 checks）。`);
+      await assessGoal(ctx, g);
+      report(ctx, describe(g));
       // 当场启动：注入隐藏的 continuation 并触发一轮，不等用户再发话。
       pi.sendMessage(
         { customType: "goal-kick", content: continuation(g), display: false },
@@ -320,6 +343,7 @@ export default function (pi: ExtensionAPI) {
         turnsRemaining: turnsRemaining(g),
         exhausted: budgetExhausted(g),
         stalledTurns: g.progress.turnsSinceChange,
+        plan: g.plan,
         audit: g.audit,
       };
       return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
@@ -338,7 +362,7 @@ export default function (pi: ExtensionAPI) {
       checks: Type.Optional(Type.Array(CheckInput, { description: "Objective acceptance checks (shell command + expect)." })),
       budgetTurns: Type.Optional(Type.Number({ description: "Turn budget. Omit unless explicitly requested." })),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, _signal, onUpdate, ctx) {
       const sid = ctx.sessionManager.getSessionId();
       const open = openGoalForSession(ctx.cwd, sid);
       if (open) {
@@ -353,7 +377,13 @@ export default function (pi: ExtensionAPI) {
       });
       saveGoal(ctx.cwd, g);
       currentGoalId = g.id;
-      return { content: [{ type: "text", text: `Goal created: ${g.id} (${g.budget.turns} turns).` }] };
+      try {
+        onUpdate?.({ content: [{ type: "text", text: "正在独立评估任务、拟定计划（新上下文，约 5–15s）…" }] });
+      } catch {
+        /* ignore */
+      }
+      await assessGoal(ctx, g);
+      return { content: [{ type: "text", text: `Goal created: ${g.id} (${g.budget.turns} turns; plan=${g.plan?.mode ?? "?"}).` }] };
     },
   });
 

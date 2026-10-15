@@ -31,6 +31,44 @@ export interface GoalAudit {
   ts: number;
 }
 
+/** 评估方式：有可执行 checks 就用 checks，否则用 rubric 评审。 */
+export type EvaluatorSpec = { kind: "checks" } | { kind: "rubric"; rubric: string };
+
+/** assessor（独立裁判）事前拟定的计划：走 direct 还是 tree、开几个方向、怎么评估。 */
+export interface GoalPlan {
+  mode: "direct" | "tree";
+  rationale: string;
+  /** 并行候选数（硬性 <= MAX_BRANCHES） */
+  branches: number;
+  /** 迭代轮数（硬性 <= MAX_DEPTH） */
+  depth: number;
+  angles: string[];
+  evaluator: EvaluatorSpec;
+  ts: number;
+}
+
+/** “只允许开几个”的硬性封顶。assessor 说什么都不能越界。 */
+export const MAX_BRANCHES = 4;
+export const MAX_DEPTH = 2;
+
+/** 把 assessor 的松散输出 clamp 成合法计划；非法/缺失一律退化为 direct。 */
+export function clampPlan(raw: Partial<GoalPlan> | undefined, opts: { hasChecks: boolean }): GoalPlan {
+  const mode = raw?.mode === "tree" ? "tree" : "direct";
+  const evaluator: EvaluatorSpec = opts.hasChecks
+    ? { kind: "checks" }
+    : { kind: "rubric", rubric: String((raw?.evaluator as { rubric?: unknown } | undefined)?.rubric ?? "").slice(0, 4000) };
+  const angles = Array.isArray(raw?.angles)
+    ? raw!.angles.map(String).map((s) => s.trim()).filter(Boolean)
+    : [];
+  const rationale = String(raw?.rationale ?? "");
+  if (mode === "direct") {
+    return { mode, rationale, branches: 1, depth: 1, angles: angles.slice(0, 1), evaluator, ts: Date.now() };
+  }
+  const branches = Math.min(MAX_BRANCHES, Math.max(1, Math.floor(Number(raw?.branches) || 2)));
+  const depth = Math.min(MAX_DEPTH, Math.max(1, Math.floor(Number(raw?.depth) || 1)));
+  return { mode, rationale, branches, depth, angles: angles.slice(0, branches), evaluator, ts: Date.now() };
+}
+
 export interface Goal {
   id: string;
   sessionId: string;
@@ -44,6 +82,7 @@ export interface Goal {
   createdAt: number;
   updatedAt: number;
   progress: { lastTreeHash?: string; turnsSinceChange: number };
+  plan?: GoalPlan;
   audit?: GoalAudit;
   log: Array<Record<string, unknown>>;
 }

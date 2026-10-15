@@ -199,8 +199,45 @@ baseline（本机）：交互首屏 ~0.21s；`pi --help`（含扩展注册）~0.
 | 4 | oracle：`oracle.ts`（shell checks + expect）+ `run_checks` 工具 | ✅ `a697997` |
 | 5 | 独立审计：`auditor.ts`（fresh-context 只读子进程）；`complete` 需 `checks ∧ audit` | ✅ `a697997` |
 | 6 | 冷启动基准 `bench/startup.py`（硬指标：交互首屏 < 300ms） | ✅ |
+| 7 | 独立裁判原语 `judge.ts` + assessor 出计划（`direct`/`tree` + 硬性封顶） | ✅ |
 
-工具面（模型）：`get_goal` / `create_goal`（支持 `checks`）/ `update_goal` / `run_checks`。
-命令面（人）：`/goal <objective> [--checks <json>]`、`/goal checks [set <json>]`、`pause|resume|clear|budget`。
+工具面（模型）：`get_goal`（带 plan）/ `create_goal`（支持 `checks`）/ `update_goal` / `run_checks`。
+命令面（人）：`/goal <objective> [--checks <json>]`、`/goal checks [set <json>]`、`/goal plan`、`pause|resume|clear|budget`。
 
-**未做（后续）**：frontier/搜索树、worktree 隔离、多 auditor 投票、自适应预算、子目标。
+---
+
+## 11. 独立裁判 + 计划（切片 7）
+
+把 auditor 的“独立能力”抽成一个通用原语，一个原语三个角色（对应三个时点）：
+
+| 时点 | 角色 | 文件 | 干什么 |
+|---|---|---|---|
+| pre-flight | **assessor** | `assessor.ts` | 事前独立评估：这题该花多少算力、走 `direct` 还是 `tree`、开几个方向、怎么评估 |
+| mid-flight | evaluator（切片 8） | — | 给候选打分、择优 |
+| post-flight | **auditor** | `auditor.ts` | 完成后对抗式验收 |
+
+三者都调 `judge.ts` 的 `runJudge()`：起一个全新上下文、只读的 pi 子进程，收回 assistant 文本并 `parseJsonObject`。独立性 = 新进程 + 新上下文 + 只读。
+
+### 计划 schema
+
+```jsonc
+{
+  "mode": "direct" | "tree",
+  "rationale": "...",
+  "branches": 1,      // 并行候选数
+  "depth": 1,         // 迭代轮数
+  "angles": ["..."],  // tree 时给出真正不同的方向
+  "evaluator": { "kind": "checks" } | { "kind": "rubric", "rubric": "..." },
+  "ts": 0
+}
+```
+
+**“只允许开几个”的硬性封顶**（`state.ts`）：`MAX_BRANCHES=4`、`MAX_DEPTH=2`。
+`clampPlan()` 在代码侧强制：assessor 说什么都不能越界；非法/缺失一律退化为 `direct`。
+有可执行 `checks` 时，evaluator 强制为 `checks`（硬 oracle）。
+
+建目标时自动跑一次 assessor（失败不阻断，退化为 `direct`）。`plan` 注入续跑提示：`direct` 照旧；`tree` 要求先对每个方向给出初步结论、比较后择优，并保留未选方向便于回退。
+
+实测：开放调研任务 → `tree`（3 个真正不同的角度 + 详细 rubric）；琐碎文件任务 → `direct`（1×1，checks）。
+
+**未做（后续）**：`tree` 的自动执行（evaluator + swarm）、frontier/搜索树持久化、worktree 隔离、多 auditor 投票、子目标。
