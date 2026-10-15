@@ -200,7 +200,7 @@ baseline（本机）：交互首屏 ~0.21s；`pi --help`（含扩展注册）~0.
 | 5 | 独立审计：`auditor.ts`（fresh-context 只读子进程）；`complete` 需 `checks ∧ audit` | ✅ `a697997` |
 | 6 | 冷启动基准 `bench/startup.py`（硬指标：交互首屏 < 300ms） | ✅ |
 
-工具面（模型）：`get_goal` / `create_goal` / `update_goal` / `run_checks`。
-命令面（人）：`/goal`。
+工具面（模型）：`get_goal` / `create_goal`（支持 `checks`）/ `update_goal` / `run_checks`。
+命令面（人）：`/goal <objective> [--checks <json>]`、`/goal checks [set <json>]`、`pause|resume|clear|budget`。
 
-**未做（后续）**：frontier/搜索树、worktree 隔离、多 auditor 投票、自适应预算、子目标、`create_goal` 里直接传 checks（目前 checks 只能手写 JSON 或后续加）。
+**未做（后续）**：frontier/搜索树、worktree 隔离、多 auditor 投票、自适应预算、子目标。

@@ -17,6 +17,7 @@ import { runAudit } from "./auditor.ts";
 import {
   activeGoalForSession,
   budgetExhausted,
+  type Check,
   type Goal,
   type GoalStatus,
   loadGoal,
@@ -25,6 +26,43 @@ import {
   saveGoal,
   turnsRemaining,
 } from "./state.ts";
+
+const CheckInput = Type.Object({
+  name: Type.String(),
+  cmd: Type.String(),
+  expect: Type.Optional(
+    Type.Object({
+      exit: Type.Optional(Type.Number()),
+      metric: Type.Optional(Type.String()),
+      op: Type.Optional(Type.Union([Type.Literal(">="), Type.Literal("<="), Type.Literal("==")])),
+      target: Type.Optional(Type.Number()),
+      stdoutMatches: Type.Optional(Type.String()),
+    }),
+  ),
+  timeoutSec: Type.Optional(Type.Number()),
+});
+
+/** 把松散的 checks 入参归一成强类型 Check；非法项跳过。 */
+function normalizeChecks(raw: unknown): Check[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Check[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const o = r as { name?: unknown; cmd?: unknown; expect?: Record<string, unknown>; timeoutSec?: unknown };
+    if (typeof o.name !== "string" || typeof o.cmd !== "string") continue;
+    const e = (o.expect ?? {}) as Record<string, unknown>;
+    let expect: Check["expect"];
+    if (e.metric !== undefined) {
+      expect = { metric: String(e.metric), op: (e.op as ">=" | "<=" | "==") ?? ">=", target: Number(e.target ?? 0) };
+    } else if (e.stdoutMatches !== undefined) {
+      expect = { stdoutMatches: String(e.stdoutMatches) };
+    } else {
+      expect = { exit: Number(e.exit ?? 0) };
+    }
+    out.push({ name: o.name, cmd: o.cmd, expect, timeoutSec: typeof o.timeoutSec === "number" ? o.timeoutSec : undefined });
+  }
+  return out;
+}
 
 // 子 agent 进程会加载同一份用户扩展；goal 只属于主会话。
 const IS_SUBAGENT = process.env.PI_SUBAGENT === "1";
@@ -149,7 +187,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("goal", {
-    description: "长程目标：/goal <objective> 新建；/goal 查看；pause|resume|clear|checks|budget",
+    description: "长程目标：/goal <objective> [--checks <json>] 新建；/goal 查看；pause|resume|clear|checks [set <json>]|budget",
     handler: async (args, ctx) => {
       const arg = args.trim();
       const sid = ctx.sessionManager.getSessionId();
@@ -202,6 +240,18 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         if (first === "checks") {
+          if (rest.startsWith("set")) {
+            const json = rest.slice(3).trim();
+            try {
+              g.checks = normalizeChecks(JSON.parse(json));
+            } catch {
+              report(ctx, "checks JSON 解析失败。", "error");
+              return;
+            }
+            saveGoal(ctx.cwd, g);
+            report(ctx, `已设置 ${g.checks.length} 条 checks。`);
+            return;
+          }
           report(ctx, g.checks.length ? g.checks.map((c) => `· ${c.name}: ${c.cmd}`).join("\n") : "该 goal 没有 checks。");
           return;
         }
@@ -223,10 +273,25 @@ export default function (pi: ExtensionAPI) {
         report(ctx, `已有未结束的 goal ${open.id}（${open.status}）。先 /goal clear 或完成它。`, "error");
         return;
       }
-      const g = newGoal({ sessionId: sid, objective: arg });
+      // 允许在 objective 后跟 --checks <json array>
+      let objective = arg;
+      let checksRaw: unknown = [];
+      const cidx = arg.indexOf(" --checks ");
+      if (cidx >= 0) {
+        objective = arg.slice(0, cidx).trim();
+        const jsonPart = arg.slice(cidx + " --checks ".length).trim();
+        try {
+          checksRaw = JSON.parse(jsonPart);
+        } catch {
+          report(ctx, "checks JSON 解析失败。", "error");
+          return;
+        }
+      }
+      const chks = normalizeChecks(checksRaw);
+      const g = newGoal({ sessionId: sid, objective, checks: chks });
       saveGoal(ctx.cwd, g);
       currentGoalId = g.id;
-      report(ctx, `已创建 goal ${g.id}（${g.budget.turns} 轮预算）。\n${describe(g)}`);
+      report(ctx, `已创建 goal ${g.id}（${g.budget.turns} 轮预算，${chks.length} 条 checks）。\n${describe(g)}`);
       // 当场启动：注入隐藏的 continuation 并触发一轮，不等用户再发话。
       pi.sendMessage(
         { customType: "goal-kick", content: continuation(g), display: false },
@@ -270,6 +335,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       objective: Type.String({ description: "The concrete objective to pursue." }),
       constraints: Type.Optional(Type.Array(Type.String(), { description: "Hard constraints / anti-goals." })),
+      checks: Type.Optional(Type.Array(CheckInput, { description: "Objective acceptance checks (shell command + expect)." })),
       budgetTurns: Type.Optional(Type.Number({ description: "Turn budget. Omit unless explicitly requested." })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -282,6 +348,7 @@ export default function (pi: ExtensionAPI) {
         sessionId: sid,
         objective: String(params.objective),
         constraints: params.constraints ?? [],
+        checks: normalizeChecks(params.checks),
         budget: params.budgetTurns ? { turns: Math.max(1, Math.floor(params.budgetTurns)) } : undefined,
       });
       saveGoal(ctx.cwd, g);
