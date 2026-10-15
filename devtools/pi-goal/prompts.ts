@@ -28,12 +28,15 @@ function planLines(goal: Goal): string {
   const angles = p.angles.length
     ? p.angles.map((a, i) => `  ${i + 1}. ${a}`).join("\n")
     : "  （未给出角度，自行提出多个不同方向）";
+  const action = goal.tree?.best
+    ? `已用独立 solver 选出最优候选：${goal.tree.bestPath ?? goal.tree.best}（${goal.tree.bestScore ?? "?"} 分）。基于它深化、补证据并核验，不要从头另写一份。`
+    : "第一个动作必须是调用 search_candidates 工具（先别自己写答案）：它会并行探索上面的方向，独立评估后返回最优候选。";
   return [
     `计划（独立评估）：开放/多方向任务，做广度优先 —— ${p.branches} 个方向 × 最多 ${p.depth} 轮；评估方式 = ${p.evaluator.kind === "checks" ? "可执行 checks" : "rubric 评审"}。`,
     p.rationale ? `理由：${p.rationale}` : "",
-    "先不要直奔第一条路。对下面每个方向给出初步结论/要点，比较后选最优深入：",
+    "计划要探索的方向：",
     angles,
-    "把未选的方向简短保留在回答里（便于回退），不要假装它们不存在。",
+    action,
   ]
     .filter(Boolean)
     .join("\n");

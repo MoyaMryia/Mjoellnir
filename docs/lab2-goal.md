@@ -200,9 +200,10 @@ baseline（本机）：交互首屏 ~0.21s；`pi --help`（含扩展注册）~0.
 | 5 | 独立审计：`auditor.ts`（fresh-context 只读子进程）；`complete` 需 `checks ∧ audit` | ✅ `a697997` |
 | 6 | 冷启动基准 `bench/startup.py`（硬指标：交互首屏 < 300ms） | ✅ |
 | 7 | 独立裁判原语 `judge.ts` + assessor 出计划（`direct`/`tree` + 硬性封顶） | ✅ |
+| 8A | `tree` 自动执行：`swarm.ts` 并行 solver + `evaluator.ts` 择优 → `best.md`；`search_candidates` 工具 | ✅ |
 
-工具面（模型）：`get_goal`（带 plan）/ `create_goal`（支持 `checks`）/ `update_goal` / `run_checks`。
-命令面（人）：`/goal <objective> [--checks <json>]`、`/goal checks [set <json>]`、`/goal plan`、`pause|resume|clear|budget`。
+工具面（模型）：`get_goal`（带 plan/tree）/ `create_goal`（支持 `checks`）/ `update_goal` / `run_checks` / `search_candidates`。
+命令面（人）：`/goal <objective> [--checks <json>]`、`/goal checks [set <json>]`、`/goal plan`、`/goal tree`、`pause|resume|clear|budget`。
 
 ---
 
@@ -240,4 +241,18 @@ baseline（本机）：交互首屏 ~0.21s；`pi --help`（含扩展注册）~0.
 
 实测：开放调研任务 → `tree`（3 个真正不同的角度 + 详细 rubric）；琐碎文件任务 → `direct`（1×1，checks）。
 
-**未做（后续）**：`tree` 的自动执行（evaluator + swarm）、frontier/搜索树持久化、worktree 隔离、多 auditor 投票、子目标。
+---
+
+## 12. Swarm：文本候选的搜索（切片 8A）
+
+`tree` 计划的自动执行：
+
+1. `search_candidates` 工具沿计划角度，并行起 N 个**独立、只读** solver（`runJudge`，无 bash，避免并发写），各产出一份 Markdown 候选，写入 `.pi/goals/<id>/branches/<bid>/answer.md`。
+2. 独立 `evaluator.ts` 读入全部候选文件，按 objective +（rubric 或 checks）打 0–100 分，选出 best。
+3. best 复制到 `.pi/goals/<id>/best.md`，返回给主 agent 深化、补证据。
+
+硬性上限仍由 `plan`（已 clamp）保证：并行 ≤ `MAX_BRANCHES(=4)`。
+
+实测（`node --experimental-strip-types` 直接单测 `runSwarm`）：2 个 solver 并行 26.8s 完成，evaluator 给 72/85 分并选出因果序角度的答案；pty 全流程：SQLite/DuckDB 任务 → 3 候选（80/85/89）→ 选 best → agent 接着真去跑基准深化。
+
+**未做（后续）**：代码类 tree（worktree 隔离 + 每候选跑 checks）、multi-round refine、多 auditor 投票、frontier 持久化、子目标。

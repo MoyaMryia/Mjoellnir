@@ -51,6 +51,29 @@ export interface GoalPlan {
 export const MAX_BRANCHES = 4;
 export const MAX_DEPTH = 2;
 
+/** 搜索树里的一个候选（一条独立方向的一个答案）。 */
+export interface Branch {
+  id: string;
+  angle: string;
+  round: number;
+  status: "done" | "failed";
+  /** 相对 cwd 的候选文件路径 */
+  artifact: string;
+  chars: number;
+  score?: number;
+  ts: number;
+}
+
+/** tree 模式的运行状态（切片 8A：文本 swarm）。 */
+export interface GoalTree {
+  round: number;
+  branches: Branch[];
+  best?: string;
+  bestScore?: number;
+  bestPath?: string;
+  judge?: string;
+}
+
 /** 把 assessor 的松散输出 clamp 成合法计划；非法/缺失一律退化为 direct。 */
 export function clampPlan(raw: Partial<GoalPlan> | undefined, opts: { hasChecks: boolean }): GoalPlan {
   const mode = raw?.mode === "tree" ? "tree" : "direct";
@@ -83,6 +106,7 @@ export interface Goal {
   updatedAt: number;
   progress: { lastTreeHash?: string; turnsSinceChange: number };
   plan?: GoalPlan;
+  tree?: GoalTree;
   audit?: GoalAudit;
   log: Array<Record<string, unknown>>;
 }
@@ -96,6 +120,23 @@ export function goalsDir(cwd: string): string {
 
 export function goalPath(cwd: string, id: string): string {
   return path.join(goalsDir(cwd), `${id}.json`);
+}
+
+/** 搜索树的落盘目录：`.pi/goals/<id>/`（与 `<id>.json` 并列）。 */
+export function goalDir(cwd: string, id: string): string {
+  return path.join(goalsDir(cwd), id);
+}
+
+export function branchesDir(cwd: string, id: string): string {
+  return path.join(goalDir(cwd, id), "branches");
+}
+
+export function branchAnswerPath(cwd: string, id: string, branchId: string): string {
+  return path.join(branchesDir(cwd, id), branchId, "answer.md");
+}
+
+export function bestAnswerPath(cwd: string, id: string): string {
+  return path.join(goalDir(cwd, id), "best.md");
 }
 
 export function newGoalId(): string {

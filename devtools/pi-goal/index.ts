@@ -9,12 +9,15 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { awareness, budgetLimit, continuation } from "./prompts.ts";
 import { formatChecks, runChecks } from "./oracle.ts";
 import { runAudit } from "./auditor.ts";
 import { runAssess } from "./assessor.ts";
+import { runSwarm } from "./swarm.ts";
 import {
   activeGoalForSession,
   budgetExhausted,
@@ -85,6 +88,10 @@ function describe(goal: Goal): string {
     lines.push(
       `plan: ${goal.plan.mode}（branches ${goal.plan.branches}, depth ${goal.plan.depth}）${goal.plan.rationale ? ` — ${goal.plan.rationale}` : ""}`,
     );
+  if (goal.tree)
+    lines.push(
+      `tree: round ${goal.tree.round}, best ${goal.tree.best ?? "-"}${goal.tree.bestScore !== undefined ? ` (${goal.tree.bestScore}分)` : ""}${goal.tree.bestPath ? ` → ${goal.tree.bestPath}` : ""}`,
+    );
   lines.push(`budget: turns ${goal.spent.turns}/${goal.budget.turns}（剩 ${turnsRemaining(goal)}）`);
   if (goal.audit) lines.push(`audit: ${goal.audit.done ? "done" : "not done"}`);
   return lines.join("\n");
@@ -126,7 +133,7 @@ async function assessGoal(ctx: ExtensionContext, goal: Goal): Promise<void> {
   saveGoal(ctx.cwd, goal);
 }
 
-const SUBCOMMANDS = new Set(["show", "pause", "resume", "clear", "checks", "budget", "plan"]);
+const SUBCOMMANDS = new Set(["show", "pause", "resume", "clear", "checks", "budget", "plan", "tree"]);
 
 export default function (pi: ExtensionAPI) {
   let currentGoalId: string | undefined;
@@ -204,7 +211,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("goal", {
-    description: "长程目标：/goal <objective> [--checks <json>] 新建；/goal 查看；pause|resume|clear|checks [set <json>]|budget",
+    description: "长程目标：/goal <objective> [--checks <json>] 新建；/goal 查看；pause|resume|clear|checks [set <json>]|budget|plan|tree",
     handler: async (args, ctx) => {
       const arg = args.trim();
       const sid = ctx.sessionManager.getSessionId();
@@ -276,6 +283,17 @@ export default function (pi: ExtensionAPI) {
           report(ctx, g.plan ? JSON.stringify(g.plan, null, 2) : "该 goal 还没有 plan。");
           return;
         }
+        if (first === "tree") {
+          if (!g.tree) {
+            report(ctx, "该 goal 还没有搜索树。");
+            return;
+          }
+          const rows = g.tree.branches
+            .map((b) => `· ${b.id} [${b.status}]${b.score !== undefined ? ` ${b.score}分` : ""} r${b.round}: ${b.angle.slice(0, 60)}`)
+            .join("\n");
+          report(ctx, `tree round ${g.tree.round}\n${rows}${g.tree.bestPath ? `\nbest → ${g.tree.bestPath}` : ""}`);
+          return;
+        }
         if (first === "budget") {
           const n = Number.parseInt(rest, 10);
           if (!Number.isFinite(n) || n <= 0) {
@@ -344,6 +362,7 @@ export default function (pi: ExtensionAPI) {
         exhausted: budgetExhausted(g),
         stalledTurns: g.progress.turnsSinceChange,
         plan: g.plan,
+        tree: g.tree,
         audit: g.audit,
       };
       return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
@@ -401,6 +420,55 @@ export default function (pi: ExtensionAPI) {
       g.log.push({ ts: Date.now(), event: "run_checks", ok: results.every((r) => r.ok) });
       saveGoal(ctx.cwd, g);
       return { content: [{ type: "text", text: formatChecks(results) }], isError: results.some((r) => !r.ok) };
+    },
+  });
+
+  pi.registerTool({
+    name: "search_candidates",
+    label: "Search Candidates",
+    promptSnippet: "Run the planned multi-angle search (plan.mode=tree) and return the best candidate.",
+    description:
+      "Only for goals whose plan mode is 'tree'. Spawns independent solvers along the planned angles, scores candidates with an independent evaluator, writes the best to .pi/goals/<id>/best.md, and returns it. Call this BEFORE writing your own answer.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, signal, onUpdate, ctx) {
+      const g = resolve(ctx);
+      if (!g) return { content: [{ type: "text", text: "No active goal." }], isError: true };
+      if (!g.plan || g.plan.mode !== "tree") {
+        return { content: [{ type: "text", text: `当前 plan.mode=${g.plan?.mode ?? "未评估"}，不需要搜索，直接求解。` }] };
+      }
+      const emit = (t: string) => {
+        try {
+          onUpdate?.({ content: [{ type: "text", text: t }] });
+        } catch {
+          /* ignore */
+        }
+      };
+      const tree = await runSwarm({ cwd: ctx.cwd, goal: g, signal, onProgress: emit });
+      g.tree = tree;
+      g.log.push({ ts: Date.now(), event: "swarm", round: tree.round, best: tree.best });
+      saveGoal(ctx.cwd, g);
+      const scoreLines = tree.branches
+        .map((b) => `· ${b.id}${b.score !== undefined ? ` ${b.score}分` : ""} — ${b.angle.slice(0, 60)}`)
+        .join("\n");
+      let bestText = "";
+      if (tree.bestPath) {
+        try {
+          bestText = fs.readFileSync(path.join(ctx.cwd, tree.bestPath), "utf-8");
+        } catch {
+          /* ignore */
+        }
+      }
+      const body = [
+        `搜索完成（round ${tree.round}）。候选：`,
+        scoreLines,
+        tree.judge ? `\n评审：${tree.judge}` : "",
+        `\n最优：${tree.best}${tree.bestScore !== undefined ? `（${tree.bestScore} 分）` : ""}${tree.bestPath ? ` → ${tree.bestPath}` : ""}`,
+        bestText ? `\n--- 最优候选全文 ---\n${bestText.slice(0, 12000)}` : "",
+        "\n现在基于最优候选深化、补齐证据后收尾，不要再从头另写一份。",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      return { content: [{ type: "text", text: body }] };
     },
   });
 
