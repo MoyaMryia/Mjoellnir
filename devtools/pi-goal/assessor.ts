@@ -60,6 +60,7 @@ export async function runAssess(opts: { cwd: string; goal: Goal; signal?: AbortS
     plan.mode = "tree";
     // assessor 原本可能判了 direct（branches=1/angles 空），强制 tree 时补足
     if (plan.branches < 2) plan.branches = 3;
+    plan.depth = Math.max(2, plan.depth); // 至少跑一轮 refine，才能验证“没改善就回退”
     if (!plan.angles.length) {
       plan.angles = [
         "最直接/最朴素的做法（先拿下一版能用的）",

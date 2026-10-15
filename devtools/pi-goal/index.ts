@@ -301,7 +301,13 @@ export default function (pi: ExtensionAPI) {
           const rows = g.tree.branches
             .map((b) => `· ${b.id} [${b.status}]${b.score !== undefined ? ` ${b.score}分` : ""} r${b.round}: ${b.angle.slice(0, 60)}`)
             .join("\n");
-          report(ctx, `tree round ${g.tree.round}\n${rows}${g.tree.bestPath ? `\nbest → ${g.tree.bestPath}` : ""}`);
+          const hist = (g.tree.history ?? [])
+            .map((h) => `  round ${h.round}: ${h.id} ${h.score}分 ${h.kept ? "✅保留" : "↩回退"} — ${h.reason}`)
+            .join("\n");
+          report(
+            ctx,
+            `tree round ${g.tree.round}（best ${g.tree.best ?? "-"}${g.tree.bestScore !== undefined ? ` ${g.tree.bestScore}分` : ""}）\n${rows}${hist ? `\n轮次决策：\n${hist}` : ""}${g.tree.bestPath ? `\nbest → ${g.tree.bestPath}` : ""}`,
+          );
           return;
         }
         if (first === "budget") {
@@ -460,6 +466,9 @@ export default function (pi: ExtensionAPI) {
       const scoreLines = tree.branches
         .map((b) => `· ${b.id}${b.score !== undefined ? ` ${b.score}分` : ""} — ${b.angle.slice(0, 60)}`)
         .join("\n");
+      const histLines = (tree.history ?? [])
+        .map((h) => `  round ${h.round}: ${h.id} ${h.score}分 ${h.kept ? "✅保留" : "↩回退"} — ${h.reason}`)
+        .join("\n");
       let bestText = "";
       if (tree.bestPath) {
         try {
@@ -471,6 +480,7 @@ export default function (pi: ExtensionAPI) {
       const body = [
         `搜索完成（round ${tree.round}）。候选：`,
         scoreLines,
+        histLines ? `\n轮次决策：\n${histLines}` : "",
         tree.judge ? `\n评审：${tree.judge}` : "",
         `\n最优：${tree.best}${tree.bestScore !== undefined ? `（${tree.bestScore} 分）` : ""}${tree.bestPath ? ` → ${tree.bestPath}` : ""}`,
         bestText ? `\n--- 最优候选全文 ---\n${bestText.slice(0, 12000)}` : "",

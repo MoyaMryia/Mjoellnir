@@ -64,14 +64,26 @@ export interface Branch {
   ts: number;
 }
 
-/** tree 模式的运行状态（切片 8A：文本 swarm）。 */
+/** tree 模式的一轮结果记录（用于“没改善就保留上一版”）。 */
+export interface TreeHistoryEntry {
+  round: number;
+  id: string;
+  score: number;
+  kept: boolean;
+  reason: string;
+  ts: number;
+}
+
+/** tree 模式的运行状态（文本 swarm + 多轮 refine）。 */
 export interface GoalTree {
   round: number;
   branches: Branch[];
   best?: string;
   bestScore?: number;
+  bestRound?: number;
   bestPath?: string;
   judge?: string;
+  history?: TreeHistoryEntry[];
 }
 
 /** 把 assessor 的松散输出 clamp 成合法计划；非法/缺失一律退化为 direct。 */

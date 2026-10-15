@@ -268,4 +268,6 @@ baseline（本机）：交互首屏 ~0.21s；`pi --help`（含扩展注册）~0.
 
 **并行 solver / auditor / evaluator 现在能联网**：`runJudge` 通过显式 `-e <search扩展>` 给子进程挂上 `web_search` / `web_fetch`（`--no-extensions` 下 `-e` 仍生效），所以候选从一开始就带真实引用、审计能自己联网核验。非交互子进程用完会关掉浏览器，避免事件循环不退出。
 
-**未做（后续）**：代码类 tree（worktree 隔离 + 每候选跑 checks）、multi-round refine、多 auditor 投票、frontier 持久化、子目标。
+**多轮 refine + “没改善就回退”（切片 8B，已做）**：`runSwarm` 现在一次调用跑完 `plan.depth` 轮（<= `MAX_DEPTH`）。round r>1 时把当前 best + evaluator 的评语喂回 solver 让其**改进**；每轮评估后门控：本轮最优 > 历史最优才覆盖 `best.md`，否则**回退保留上一版**并停止。`tree.history` 记录每轮 kept/rollback。实测：90→91 保留；100→100 回退。
+
+**未做（后续）**：代码类 tree（worktree 隔离 + 每候选跑 checks）、多 auditor 投票、frontier 持久化、子目标。
