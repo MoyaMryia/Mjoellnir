@@ -51,12 +51,21 @@ export async function runAssess(opts: { cwd: string; goal: Goal; signal?: AbortS
   const plan = clampPlan(draft, { hasChecks: opts.goal.checks.length > 0 });
   // 对照实验用：强制 direct / tree，绕过 assessor 的自动判定
   const forced = process.env.PI_GOAL_FORCE_MODE;
-  if (forced === "direct" || forced === "tree") {
-    plan.mode = forced;
-    if (forced === "direct") {
-      plan.branches = 1;
-      plan.depth = 1;
-      plan.angles = [];
+  if (forced === "direct") {
+    plan.mode = "direct";
+    plan.branches = 1;
+    plan.depth = 1;
+    plan.angles = [];
+  } else if (forced === "tree") {
+    plan.mode = "tree";
+    // assessor 原本可能判了 direct（branches=1/angles 空），强制 tree 时补足
+    if (plan.branches < 2) plan.branches = 3;
+    if (!plan.angles.length) {
+      plan.angles = [
+        "最直接/最朴素的做法（先拿下一版能用的）",
+        "换一个完全不同的思路（反向假设 / 不同算法族）",
+        "对抗式：先假设当前方案是错的，找出反例并修正",
+      ].slice(0, plan.branches);
     }
   }
   return plan;

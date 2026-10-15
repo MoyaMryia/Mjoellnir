@@ -111,7 +111,7 @@ export interface Goal {
   log: Array<Record<string, unknown>>;
 }
 
-export const DEFAULT_TURNS = 20;
+export const DEFAULT_TURNS = Number.parseInt(process.env.PI_GOAL_DEFAULT_TURNS ?? "", 10) || 20;
 const GOALS_SUBDIR = path.join(".pi", "goals");
 
 export function goalsDir(cwd: string): string {

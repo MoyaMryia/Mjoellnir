@@ -26,8 +26,12 @@ GOAL_EXT = os.path.abspath(os.path.join(ROOT, "..", "..", "index.ts"))
 
 
 def goal_turns(work):
+    import glob
+    files = glob.glob(os.path.join(work, ".pi", "goals", "*.json"))
+    if not files:
+        return "?"
     try:
-        return json.load(open(os.path.join(work, ".pi", "goals", "g-bench.json")))["spent"]["turns"]
+        return json.load(open(max(files, key=os.path.getmtime)))["spent"]["turns"]
     except Exception:
         return "?"
 
@@ -55,31 +59,22 @@ def main():
 
     sid = "bench-" + ts
     os.makedirs(os.path.join(work, ".pi", "goals"), exist_ok=True)
-    now = int(time.time() * 1000)
-    goal = {
-        "id": "g-bench",
-        "sessionId": sid,
-        "objective": objective,
-        "constraints": [],
-        "checks": [],  # 留空：答案不写进 goal 文件
-        "budget": {"turns": args.budget},
-        "spent": {"turns": 0, "tokens": 0, "minutes": 0},
-        "status": "active",
-        "origin": "user",
-        "createdAt": now,
-        "updatedAt": now,
-        "progress": {"turnsSinceChange": 0},
-        "log": [],
-    }
-    with open(os.path.join(work, ".pi", "goals", "g-bench.json"), "w") as f:
-        json.dump(goal, f, ensure_ascii=False, indent=2)
 
     env = dict(os.environ)
     env["PI_GOAL_NO_SEARCH"] = "1"  # 关搜索
+    env["PI_GOAL_DEFAULT_TURNS"] = str(args.budget)
     if args.mode != "auto":
         env["PI_GOAL_FORCE_MODE"] = args.mode
+    if args.model:  # 让主 agent 与四个角色用同一个 base 模型（否则对照会被强 solver 污染）
+        for role in ("ASSESSOR", "EVALUATOR", "AUDITOR", "SOLVER"):
+            env[f"PI_GOAL_{role}_MODEL"] = args.model
 
-    cmd = ["pi", "--no-extensions", "-e", GOAL_EXT, "--session-id", sid, "-p", "继续推进当前的 thread goal。"]
+    # 让 agent 自己调 create_goal：这样 assessor 会真的跑，plan/force-mode 才会生效
+    kick = (
+        "请调用 create_goal 工具，把下面这段任务原文作为 objective 创建一个 goal，然后持续推进直到完成：\n\n"
+        + objective
+    )
+    cmd = ["pi", "--no-extensions", "-e", GOAL_EXT, "--session-id", sid, "-p", kick]
     if args.model:
         cmd += ["--model", args.model]
 
