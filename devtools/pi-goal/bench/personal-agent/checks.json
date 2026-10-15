@@ -1,0 +1,37 @@
+[
+  {
+    "name": "report_exists",
+    "cmd": "test -f report.md",
+    "expect": { "exit": 0 }
+  },
+  {
+    "name": "min_length",
+    "cmd": "echo \"CHARS=$(wc -m < report.md | tr -d ' ')\"",
+    "expect": { "metric": "CHARS", "op": ">=", "target": 1000 }
+  },
+  {
+    "name": "max_length",
+    "cmd": "echo \"CHARS=$(wc -m < report.md | tr -d ' ')\"",
+    "expect": { "metric": "CHARS", "op": "<=", "target": 6000 }
+  },
+  {
+    "name": "has_background",
+    "cmd": "grep -qiE '背景|现状|市场|玩家|时间线' report.md && echo BG=1 || echo BG=0",
+    "expect": { "metric": "BG", "op": ">=", "target": 1 }
+  },
+  {
+    "name": "has_decision",
+    "cmd": "grep -qiE 'go|no-go|不做|值得|不值得|建议' report.md && echo DECISION=1 || echo DECISION=0",
+    "expect": { "metric": "DECISION", "op": ">=", "target": 1 }
+  },
+  {
+    "name": "has_how",
+    "cmd": "grep -qiE '怎么做|技术路线|架构|切入|护城河|成本' report.md && echo HOW=1 || echo HOW=0",
+    "expect": { "metric": "HOW", "op": ">=", "target": 1 }
+  },
+  {
+    "name": "source_or_speculation_tagged",
+    "cmd": "grep -qiE '推测|未核实|来源|http|引用' report.md && echo SRC=1 || echo SRC=0",
+    "expect": { "metric": "SRC", "op": ">=", "target": 1 }
+  }
+]
