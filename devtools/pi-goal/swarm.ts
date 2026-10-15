@@ -10,10 +10,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { runEvaluate } from "./evaluator.ts";
 import { runJudge } from "./judge.ts";
+import { resolveRole, searchExtensionPath } from "./roleconfig.ts";
 import { bestAnswerPath, branchAnswerPath, type Branch, type Goal, type GoalTree } from "./state.ts";
 
 const SOLVER_SYSTEM = `You are one independent solver working on a single assigned angle of a task.
 Commit to your assigned angle; do not hedge back toward the obvious answer. Produce a complete, self-contained candidate answer in Markdown.
+You CAN search the web with the web_search tool and read pages with web_fetch. Use them to ground concrete claims; cite URLs inline for any external fact, and mark anything you could not verify as \u3010推测/未核实\u3011.
 Be concrete and specific: state claims precisely and give concrete examples, numbers, or reasoning where relevant.
 Do not ask questions. Do not mention that other solvers exist. Output only the candidate answer.`;
 
@@ -61,12 +63,15 @@ export async function runSwarm(opts: {
     angles.map(async (angle, i) => {
       const id = `r${round}b${i + 1}`;
       const abs = branchAnswerPath(cwd, goal.id, id);
+      const rc = resolveRole("solver");
       const r = await runJudge({
         cwd,
         systemPrompt: SOLVER_SYSTEM,
         task: buildSolverTask(goal, angle),
-        tools: "read,grep,find,ls",
-        model: process.env.PI_GOAL_SOLVER_MODEL,
+        tools: "read,grep,find,ls,web_search,web_fetch",
+        model: rc.model,
+        thinking: rc.thinking,
+        extensions: [searchExtensionPath()].filter((p): p is string => !!p),
         timeoutMs: SOLVER_TIMEOUT_MS,
         signal: opts.signal,
       });

@@ -17,6 +17,7 @@ import { awareness, budgetLimit, continuation } from "./prompts.ts";
 import { formatChecks, runChecks } from "./oracle.ts";
 import { runAudit } from "./auditor.ts";
 import { runAssess } from "./assessor.ts";
+import { agentFileFor, resolveRole } from "./roleconfig.ts";
 import { runSwarm } from "./swarm.ts";
 import {
   activeGoalForSession,
@@ -133,7 +134,7 @@ async function assessGoal(ctx: ExtensionContext, goal: Goal): Promise<void> {
   saveGoal(ctx.cwd, goal);
 }
 
-const SUBCOMMANDS = new Set(["show", "pause", "resume", "clear", "checks", "budget", "plan", "tree"]);
+const SUBCOMMANDS = new Set(["show", "pause", "resume", "clear", "checks", "budget", "plan", "tree", "roles"]);
 
 export default function (pi: ExtensionAPI) {
   let currentGoalId: string | undefined;
@@ -211,7 +212,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("goal", {
-    description: "长程目标：/goal <objective> [--checks <json>] 新建；/goal 查看；pause|resume|clear|checks [set <json>]|budget|plan|tree",
+    description: "长程目标：/goal <objective> [--checks <json>] 新建；/goal 查看；pause|resume|clear|checks [set <json>]|budget|plan|tree|roles",
     handler: async (args, ctx) => {
       const arg = args.trim();
       const sid = ctx.sessionManager.getSessionId();
@@ -238,6 +239,15 @@ export default function (pi: ExtensionAPI) {
           currentGoalId = undefined;
           try { ctx.abort(); } catch { /* 未在跑则忽略 */ }
           report(ctx, `已清除 goal ${g.id}（文件保留在 .pi/goals/）。`);
+          return;
+        }
+        if (first === "roles") {
+          const roles = ["assessor", "evaluator", "auditor", "solver"] as const;
+          const lines = roles.map((r) => {
+            const rc = resolveRole(r);
+            return `· ${r}: model=${rc.model ?? "inherit"}, thinking=${rc.thinking ?? "inherit"}`;
+          });
+          report(ctx, `goal 角色模型（用 /setagent <role> <model>[:thinking] 修改）：\n${lines.join("\n")}\n\n文件：${agentFileFor("auditor")} 等`);
           return;
         }
         if (!g) {

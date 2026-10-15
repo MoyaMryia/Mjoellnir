@@ -7,7 +7,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { browserFetch, browserSearch } from "./browser.ts";
+import { browserFetch, browserSearch, closeBrowser } from "./browser.ts";
 import { fetchPage, searchWeb } from "./search.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -30,7 +30,7 @@ export default function (pi: ExtensionAPI) {
       ),
       cookies: Type.Optional(Type.Boolean({ description: "Use Firefox session cookies (default true)" })),
     }),
-    async execute(_id, params, _signal, onUpdate, _ctx) {
+    async execute(_id, params, _signal, onUpdate, ctx) {
       const query = String(params.query ?? "").trim();
       if (!query) return { content: [{ type: "text", text: "query 不能为空。" }], isError: true };
       try {
@@ -53,6 +53,7 @@ export default function (pi: ExtensionAPI) {
           error = undefined;
         }
       }
+      if (!ctx.hasUI) await closeBrowser(); // 非交互子进程：用完必须收浏览器，否则不退出
       if (!results.length) {
         return { content: [{ type: "text", text: `没有结果。${error ?? ""}` }], isError: true };
       }
@@ -78,7 +79,7 @@ export default function (pi: ExtensionAPI) {
       render: Type.Optional(Type.Boolean({ description: "Render with a real browser (default true; set false for a fast plain HTTP fetch)" })),
       cookies: Type.Optional(Type.Boolean({ description: "Send matching Firefox session cookies (default true)" })),
     }),
-    async execute(_id, params, _signal, onUpdate, _ctx) {
+    async execute(_id, params, _signal, onUpdate, ctx) {
       const url = String(params.url ?? "").trim();
       if (!/^https?:\/\//i.test(url)) {
         return { content: [{ type: "text", text: "url 必须是 http(s) 绝对地址。" }], isError: true };
@@ -95,6 +96,7 @@ export default function (pi: ExtensionAPI) {
         const h = await fetchPage(url, { maxChars: params.maxChars, cookies }); // HTTP 兜底
         if (h.ok) r = h;
       }
+      if (!ctx.hasUI) await closeBrowser(); // 非交互子进程：用完必须收浏览器
       if (!r.ok) return { content: [{ type: "text", text: `抓取失败：${r.error}` }], isError: true };
       const head = r.title ? `# ${r.title}\n${url}\n\n` : `${url}\n\n`;
       return { content: [{ type: "text", text: head + r.text }] };

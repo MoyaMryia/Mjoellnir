@@ -36,6 +36,8 @@ export function runJudge(opts: {
   task: string;
   tools?: string;
   model?: string;
+  thinking?: string;
+  extensions?: string[];
   timeoutMs?: number;
   signal?: AbortSignal;
 }): Promise<JudgeResult> {
@@ -54,8 +56,12 @@ export function runJudge(opts: {
   }
 
   const args = ["--mode", "json", "-p", "--no-session", "--no-extensions"];
+  for (const ext of opts.extensions ?? []) {
+    if (fs.existsSync(ext)) args.push("-e", ext); // 显式 -e 在 --no-extensions 下仍生效
+  }
   if (tools) args.push("--tools", tools);
   if (opts.model) args.push("--model", opts.model);
+  if (opts.thinking) args.push("--thinking", opts.thinking);
   args.push("--append-system-prompt", promptFile, "--", `Task: ${task}`);
 
   const inv = getPiInvocation(args);
@@ -157,8 +163,7 @@ export function runJudge(opts: {
   });
 }
 
-/** 从模型输出里抓第一个可解析的 JSON 对象（容忍 ```json 包裹和前后废话）。 */
-export function parseJsonObject<T>(raw: string): T | undefined {
+/** 从模型输出里抓第一个可解析的 JSON 对象（容忍 ```json 包裹和前后废话）。 */export function parseJsonObject<T>(raw: string): T | undefined {
   const text = raw.trim();
   const candidates: string[] = [];
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);

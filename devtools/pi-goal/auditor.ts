@@ -7,6 +7,7 @@
  */
 
 import { parseJsonObject, runJudge } from "./judge.ts";
+import { resolveRole, searchExtensionPath } from "./roleconfig.ts";
 import type { Goal } from "./state.ts";
 
 export interface AuditResult {
@@ -58,12 +59,16 @@ function parseVerdict(raw: string): AuditResult {
 }
 
 export async function runAudit(opts: { cwd: string; goal: Goal; signal?: AbortSignal }): Promise<AuditResult> {
+  const rc = resolveRole("auditor");
+  const exts = [searchExtensionPath()].filter((p): p is string => !!p);
   const r = await runJudge({
     cwd: opts.cwd,
     systemPrompt: SYSTEM_PROMPT,
     task: buildTask(opts.goal),
-    tools: "read,grep,find,ls,bash",
-    model: process.env.PI_GOAL_AUDITOR_MODEL,
+    tools: "read,grep,find,ls,bash,web_search,web_fetch",
+    model: rc.model,
+    thinking: rc.thinking,
+    extensions: exts,
     timeoutMs: AUDIT_TIMEOUT_MS,
     signal: opts.signal,
   });

@@ -6,6 +6,7 @@
  */
 
 import { parseJsonObject, runJudge } from "./judge.ts";
+import { resolveRole, searchExtensionPath } from "./roleconfig.ts";
 import type { Goal } from "./state.ts";
 
 export interface CandidateRef {
@@ -65,8 +66,10 @@ export async function runEvaluate(opts: {
     cwd: opts.cwd,
     systemPrompt: EVAL_SYSTEM,
     task: buildTask(opts.goal, opts.candidates),
-    tools: "read,grep,find,ls",
-    model: process.env.PI_GOAL_EVALUATOR_MODEL,
+    tools: "read,grep,find,ls,web_search,web_fetch",
+    model: resolveRole("evaluator").model,
+    thinking: resolveRole("evaluator").thinking,
+    extensions: [searchExtensionPath()].filter((p): p is string => !!p),
     timeoutMs: 180_000,
     signal: opts.signal,
   });

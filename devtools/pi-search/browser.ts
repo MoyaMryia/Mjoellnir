@@ -68,6 +68,18 @@ function installExitHook(): void {
 
 export type Engine = "bing" | "sogou";
 
+/** 关掉单例浏览器（非交互子进程用完必须收，否则事件循环不退出）。 */
+export async function closeBrowser(): Promise<void> {
+  const p = browserPromise;
+  browserPromise = undefined;
+  try {
+    const b = await p;
+    await b?.close?.();
+  } catch {
+    /* ignore */
+  }
+}
+
 async function newContext(browser: any, domain: string, useCookies: boolean): Promise<any> {
   const ctx = await browser.newContext({ locale: "zh-CN", userAgent: UA });
   if (useCookies) {

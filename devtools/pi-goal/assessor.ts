@@ -6,6 +6,7 @@
  */
 
 import { parseJsonObject, runJudge } from "./judge.ts";
+import { resolveRole, searchExtensionPath } from "./roleconfig.ts";
 import { clampPlan, type Goal, type GoalPlan, MAX_BRANCHES, MAX_DEPTH } from "./state.ts";
 
 const SYSTEM_PROMPT = `You are an independent task assessor for a coding agent's goal.
@@ -35,12 +36,14 @@ function buildTask(goal: Goal): string {
 }
 
 export async function runAssess(opts: { cwd: string; goal: Goal; signal?: AbortSignal }): Promise<GoalPlan> {
+  const rc = resolveRole("assessor");
   const r = await runJudge({
     cwd: opts.cwd,
     systemPrompt: SYSTEM_PROMPT,
     task: buildTask(opts.goal),
     tools: "read,grep,find,ls",
-    model: process.env.PI_GOAL_ASSESSOR_MODEL,
+    model: rc.model,
+    thinking: rc.thinking,
     timeoutMs: 120_000,
     signal: opts.signal,
   });

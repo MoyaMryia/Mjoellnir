@@ -255,4 +255,17 @@ baseline（本机）：交互首屏 ~0.21s；`pi --help`（含扩展注册）~0.
 
 实测（`node --experimental-strip-types` 直接单测 `runSwarm`）：2 个 solver 并行 26.8s 完成，evaluator 给 72/85 分并选出因果序角度的答案；pty 全流程：SQLite/DuckDB 任务 → 3 候选（80/85/89）→ 选 best → agent 接着真去跑基准深化。
 
+---
+
+## 13. 角色模型配置（复用 /setagent）（切片 9）
+
+/goal 的四个角色（assessor / evaluator / auditor / solver）的 model + thinking **复用 subagent 的 agent 文件约定**：`~/.pi/agent/agents/<role>.md` 的 frontmatter `model` / `thinking`。
+
+- 直接用现成命令改：`/setagent auditor deepseek/deepseek-flash:high`；`/agents` 里也能看到。
+- `/goal roles` 查看各角色当前解析到的模型。
+- 优先级：env `PI_GOAL_<ROLE>_MODEL` / `_THINKING` > agent 文件 > 继承。
+- 代码：`roleconfig.ts::resolveRole()`；`judge.ts::runJudge()` 现支持 `thinking` 与 `extensions`。
+
+**并行 solver / auditor / evaluator 现在能联网**：`runJudge` 通过显式 `-e <search扩展>` 给子进程挂上 `web_search` / `web_fetch`（`--no-extensions` 下 `-e` 仍生效），所以候选从一开始就带真实引用、审计能自己联网核验。非交互子进程用完会关掉浏览器，避免事件循环不退出。
+
 **未做（后续）**：代码类 tree（worktree 隔离 + 每候选跑 checks）、multi-round refine、多 auditor 投票、frontier 持久化、子目标。
