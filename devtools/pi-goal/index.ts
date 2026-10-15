@@ -174,6 +174,7 @@ export default function (pi: ExtensionAPI) {
           g.log.push({ ts: Date.now(), event: "clear" });
           saveGoal(ctx.cwd, g);
           currentGoalId = undefined;
+          try { ctx.abort(); } catch { /* 未在跑则忽略 */ }
           report(ctx, `已清除 goal ${g.id}（文件保留在 .pi/goals/）。`);
           return;
         }
@@ -184,13 +185,20 @@ export default function (pi: ExtensionAPI) {
         if (first === "pause") {
           g.status = "paused";
           saveGoal(ctx.cwd, g);
-          report(ctx, `已暂停 ${g.id}。`);
+          continuationPending = false;
+          try { ctx.abort(); } catch { /* 未在跑则忽略 */ }
+          report(ctx, `已暂停 ${g.id}，并打断当前那轮。`);
           return;
         }
         if (first === "resume") {
           g.status = "active";
           saveGoal(ctx.cwd, g);
           report(ctx, `已恢复 ${g.id}（剩 ${turnsRemaining(g)} 轮）。`);
+          // 当场续跑
+          pi.sendMessage(
+            { customType: "goal-kick", content: continuation(g), display: false },
+            { triggerTurn: true },
+          );
           return;
         }
         if (first === "checks") {
@@ -219,6 +227,11 @@ export default function (pi: ExtensionAPI) {
       saveGoal(ctx.cwd, g);
       currentGoalId = g.id;
       report(ctx, `已创建 goal ${g.id}（${g.budget.turns} 轮预算）。\n${describe(g)}`);
+      // 当场启动：注入隐藏的 continuation 并触发一轮，不等用户再发话。
+      pi.sendMessage(
+        { customType: "goal-kick", content: continuation(g), display: false },
+        { triggerTurn: true },
+      );
     },
   });
 
