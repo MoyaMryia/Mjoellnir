@@ -317,13 +317,22 @@ export default function (pi: ExtensionAPI) {
       status: Type.Union([Type.Literal("complete"), Type.Literal("blocked"), Type.Literal("paused")]),
       reason: Type.Optional(Type.String()),
     }),
-    async execute(_id, params, signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, onUpdate, ctx) {
       const g = resolve(ctx);
       if (!g) return { content: [{ type: "text", text: "No active goal." }], isError: true };
       const status = params.status as "complete" | "blocked" | "paused";
 
+      const emit = (t: string) => {
+        try {
+          onUpdate?.({ content: [{ type: "text", text: t }] });
+        } catch {
+          /* ignore */
+        }
+      };
+
       if (status === "complete") {
         // 1) oracle：checks 是硬门槛
+        emit("核验完成提议：正在跑 checks…");
         const results = await runChecks(ctx.cwd, g.checks, signal);
         g.log.push({ ts: Date.now(), event: "checks", ok: results.every((r) => r.ok) });
         if (results.some((r) => !r.ok)) {
@@ -334,6 +343,7 @@ export default function (pi: ExtensionAPI) {
           };
         }
         // 2) 独立审计（新上下文）
+        emit("checks 通过，开始独立审计（新上下文，约 30–60s，稍等）…");
         const audit = await runAudit({ cwd: ctx.cwd, goal: g, signal });
         g.audit = { done: audit.done, missing: audit.missing, evidence: audit.evidence, judge: audit.judge, ts: Date.now() };
         if (!audit.done) {

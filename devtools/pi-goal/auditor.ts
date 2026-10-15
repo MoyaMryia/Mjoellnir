@@ -96,7 +96,7 @@ export function runAudit(opts: { cwd: string; goal: Goal; signal?: AbortSignal }
   }
 
   const model = process.env.PI_GOAL_AUDITOR_MODEL;
-  const args = ["--mode", "json", "-p", "--no-session", "--exclude-tools", "subagent", "--tools", "read,grep,find,ls,bash"];
+  const args = ["--mode", "json", "-p", "--no-session", "--no-extensions", "--tools", "read,grep,find,ls,bash"];
   if (model) args.push("--model", model);
   args.push("--append-system-prompt", promptFile, "--", `Task: ${buildTask(goal)}`);
 

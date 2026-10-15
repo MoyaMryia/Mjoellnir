@@ -69,6 +69,7 @@ export function continuation(goal: Goal): string {
     "- 把目标拆成具体 requirement，逐条找当前状态里的权威证据（文件 / 命令输出 / 测试 / 运行行为）。",
     "- 证据不确定、间接、或只是「看起来完成了」 ⇒ 视为未完成。",
     "- 只有每条 requirement 都被证据证明满足，才调用 update_goal(status=\"complete\") 提议完成；系统会独立复核。",
+    "- 如果目标本身没有可验收的产出、无法核验达成：不要空转。向用户澄清，或（同一原因连续 ≥3 轮后）调用 update_goal(status=\"blocked\")。",
     "",
     budgetLines(goal),
     lowBudget ? "\n剩余轮次不多：优先收尾最关键的未完成项，并在结尾说明还差什么。" : "",
