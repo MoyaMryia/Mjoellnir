@@ -886,7 +886,7 @@ def main():
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--cwd", default=os.path.expanduser("~/Projects/GSE/Lab1/assistant"))
-    ap.add_argument("--model", default="deepseek/deepseek-v4.1-flash-expires-on-0910")
+    ap.add_argument("--model", default="deepseek/deepseek-flash")
     ap.add_argument("--timeout", type=int, default=300, help="单次任务超时秒数")
     ap.add_argument("--idle", type=int, default=1800, help="空闲多久回收 pi 进程（秒）")
     ap.add_argument("--token", default=os.environ.get("PI_GATEWAY_TOKEN", ""))
