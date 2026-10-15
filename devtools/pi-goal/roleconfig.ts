@@ -52,6 +52,7 @@ export function resolveRole(role: GoalRole): RoleConfig {
 
 /** 搜索扩展的绝对路径（供 child 用显式 -e 加载）；找不到返回 undefined。 */
 export function searchExtensionPath(): string | undefined {
+  if (process.env.PI_GOAL_NO_SEARCH === "1") return undefined; // 评测用：断搜索
   const candidates: string[] = [];
   try {
     candidates.push(new URL("../pi-search/index.ts", import.meta.url).pathname);

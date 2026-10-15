@@ -1,0 +1,4 @@
+PASS	crypto	direct	turns=5	26s	exit=0
+PASS	inversion	direct	turns=3	25s	exit=0
+PASS	crypto	tree	turns=5	24s	exit=0
+PASS	inversion	tree	turns=6	32s	exit=0

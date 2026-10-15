@@ -48,5 +48,16 @@ export async function runAssess(opts: { cwd: string; goal: Goal; signal?: AbortS
     signal: opts.signal,
   });
   const draft = parseJsonObject<Partial<GoalPlan>>(r.text);
-  return clampPlan(draft, { hasChecks: opts.goal.checks.length > 0 });
+  const plan = clampPlan(draft, { hasChecks: opts.goal.checks.length > 0 });
+  // 对照实验用：强制 direct / tree，绕过 assessor 的自动判定
+  const forced = process.env.PI_GOAL_FORCE_MODE;
+  if (forced === "direct" || forced === "tree") {
+    plan.mode = forced;
+    if (forced === "direct") {
+      plan.branches = 1;
+      plan.depth = 1;
+      plan.angles = [];
+    }
+  }
+  return plan;
 }
