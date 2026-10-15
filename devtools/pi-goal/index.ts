@@ -12,6 +12,8 @@ import { createHash } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { awareness, budgetLimit, continuation } from "./prompts.ts";
+import { formatChecks, runChecks } from "./oracle.ts";
+import { runAudit } from "./auditor.ts";
 import {
   activeGoalForSession,
   budgetExhausted,
@@ -276,6 +278,23 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "run_checks",
+    label: "Run Checks",
+    promptSnippet: "Run the current goal's checks (oracle) and return pass/fail.",
+    description: "Run the current goal's checks (read-only shell commands defined by the goal) and return their results.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, signal, _onUpdate, ctx) {
+      const g = resolve(ctx);
+      if (!g) return { content: [{ type: "text", text: "No active goal." }], isError: true };
+      if (!g.checks.length) return { content: [{ type: "text", text: "该 goal 没有 checks。" }] };
+      const results = await runChecks(ctx.cwd, g.checks, signal);
+      g.log.push({ ts: Date.now(), event: "run_checks", ok: results.every((r) => r.ok) });
+      saveGoal(ctx.cwd, g);
+      return { content: [{ type: "text", text: formatChecks(results) }], isError: results.some((r) => !r.ok) };
+    },
+  });
+
+  pi.registerTool({
     name: "update_goal",
     label: "Update Goal",
     promptSnippet: "Propose completing/pausing/blocking the current goal.",
@@ -285,23 +304,47 @@ export default function (pi: ExtensionAPI) {
       status: Type.Union([Type.Literal("complete"), Type.Literal("blocked"), Type.Literal("paused")]),
       reason: Type.Optional(Type.String()),
     }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       const g = resolve(ctx);
       if (!g) return { content: [{ type: "text", text: "No active goal." }], isError: true };
       const status = params.status as "complete" | "blocked" | "paused";
-      let next: GoalStatus;
-      if (status === "complete") next = "satisfied";
-      else if (status === "blocked") next = "blocked";
-      else next = "paused";
+
+      if (status === "complete") {
+        // 1) oracle：checks 是硬门槛
+        const results = await runChecks(ctx.cwd, g.checks, signal);
+        g.log.push({ ts: Date.now(), event: "checks", ok: results.every((r) => r.ok) });
+        if (results.some((r) => !r.ok)) {
+          saveGoal(ctx.cwd, g);
+          return {
+            content: [{ type: "text", text: `完成被拒绝：checks 未通过。\n${formatChecks(results)}\n\n修正后重新提议 complete。` }],
+            isError: true,
+          };
+        }
+        // 2) 独立审计（新上下文）
+        const audit = await runAudit({ cwd: ctx.cwd, goal: g, signal });
+        g.audit = { done: audit.done, missing: audit.missing, evidence: audit.evidence, judge: audit.judge, ts: Date.now() };
+        if (!audit.done) {
+          g.log.push({ ts: Date.now(), event: "audit", done: false });
+          saveGoal(ctx.cwd, g);
+          const miss = audit.missing.length ? audit.missing.map((m) => `- ${m}`).join("\n") : "(未给出)";
+          return {
+            content: [{ type: "text", text: `完成被独立审计拒绝。缺口：\n${miss}\n\n审计意见：${audit.judge}\n\n补齐后重新提议 complete。` }],
+            isError: true,
+          };
+        }
+        g.status = "satisfied";
+        g.log.push({ ts: Date.now(), event: "status:complete", checks: results.length, audit: true });
+        saveGoal(ctx.cwd, g);
+        continuationPending = false;
+        return { content: [{ type: "text", text: `Goal ${g.id} 完成：checks 通过 ∧ 独立审计确认。\n${formatChecks(results)}` }] };
+      }
+
+      const next: GoalStatus = status === "blocked" ? "blocked" : "paused";
       g.status = next;
       g.log.push({ ts: Date.now(), event: `status:${status}`, reason: params.reason });
       saveGoal(ctx.cwd, g);
       continuationPending = false;
-      const note =
-        status === "complete"
-          ? "（注意：切片 3 尚未接入 oracle/独立审计，complete 目前直接生效；切片 4/5 会把核验接上。）"
-          : "";
-      return { content: [{ type: "text", text: `Goal ${g.id} → ${next}. ${note}` }] };
+      return { content: [{ type: "text", text: `Goal ${g.id} → ${next}.` }] };
     },
   });
 }
